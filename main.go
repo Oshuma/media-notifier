@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -21,11 +22,12 @@ var (
 func main() {
 	credProfile := flag.String("credentials", "default", "AWS credentials profile; see https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html")
 	topicArn := flag.String("topic", "", "SNS topic ARN (required)")
+	logFilename := flag.String("log", "/tmp/media-notifier.log", "File to write logs")
 	version := flag.Bool("version", false, "Print version")
 	flag.Parse()
 
 	if *version {
-		fmt.Printf("v%s-%s\n", Version, BuildTag)
+		fmt.Println(versionString())
 		os.Exit(0)
 	}
 
@@ -34,6 +36,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	logFile, err := os.OpenFile(*logFilename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer logFile.Close()
+
+	logger := log.New(logFile, versionString()+": ", log.LstdFlags)
+
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		Profile:           *credProfile,
 		SharedConfigState: session.SharedConfigEnable,
@@ -41,8 +52,7 @@ func main() {
 
 	message, err := buildMessage()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		logger.Fatal(err)
 	}
 
 	client := sns.New(sess)
@@ -54,11 +64,10 @@ func main() {
 	// First return value is the MessageId returned from SNS on success.
 	_, err = client.Publish(input)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		logger.Fatal(err)
 	}
 
-	fmt.Printf("Sent SMS: %s\n", message)
+	logger.Printf("Sent SMS: %s\n", message)
 }
 
 func buildMessage() (string, error) {
@@ -67,4 +76,8 @@ func buildMessage() (string, error) {
 		return "", errors.New("TR_TORRENT_NAME not set")
 	}
 	return "Downloaded: " + name, nil
+}
+
+func versionString() string {
+	return fmt.Sprintf("v%s-%s", Version, BuildTag)
 }
